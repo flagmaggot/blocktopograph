@@ -1,9 +1,7 @@
 package com.mithrilmania.blocktopograph;
 
-import android.os.Bundle;
-
 import android.view.ViewGroup;
-import com.mithrilmania.blocktopograph.chunk.ChunkData;
+
 import com.mithrilmania.blocktopograph.chunk.NBTChunkData;
 import com.mithrilmania.blocktopograph.map.Dimension;
 import com.mithrilmania.blocktopograph.map.marker.AbstractMarker;
@@ -23,17 +21,17 @@ public interface WorldActivityInterface {
 
     boolean getShowGrid();
 
+    boolean getShowMarkers();
+
     void onFatalDBError(WorldData.WorldDBException worldDB);
 
     void addMarker(AbstractMarker marker);
 
-    void logFirebaseEvent(WorldActivity.CustomFirebaseEvent firebaseEvent);
-
-    void logFirebaseEvent(WorldActivity.CustomFirebaseEvent firebaseEvent, Bundle eventContent);
-
     void showActionBar();
 
     void hideActionBar();
+
+    void openDrawer();
 
     EditableNBT getEditablePlayer() throws Exception;
 

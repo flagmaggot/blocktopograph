@@ -1,10 +1,13 @@
 package com.mithrilmania.blocktopograph.map;
 
 import android.os.AsyncTask;
-import com.mithrilmania.blocktopograph.Log;
+import android.view.ViewGroup;
+import android.view.ViewParent;
 
+import com.mithrilmania.blocktopograph.Log;
 import com.mithrilmania.blocktopograph.WorldActivityInterface;
-import com.mithrilmania.blocktopograph.chunk.*;
+import com.mithrilmania.blocktopograph.chunk.Chunk;
+import com.mithrilmania.blocktopograph.chunk.NBTChunkData;
 import com.mithrilmania.blocktopograph.map.marker.AbstractMarker;
 import com.mithrilmania.blocktopograph.nbt.tags.CompoundTag;
 import com.mithrilmania.blocktopograph.nbt.tags.FloatTag;
@@ -13,6 +16,7 @@ import com.mithrilmania.blocktopograph.nbt.tags.ListTag;
 import com.mithrilmania.blocktopograph.nbt.tags.StringTag;
 import com.mithrilmania.blocktopograph.nbt.tags.Tag;
 
+import java.lang.ref.WeakReference;
 import java.util.Collection;
 import java.util.List;
 
@@ -21,28 +25,29 @@ import java.util.List;
  */
 public class MarkerAsyncTask extends AsyncTask<Void, AbstractMarker, Void> {
 
-    private final WorldActivityInterface worldProvider;
-    private final ChunkManager chunkManager;
+    private final WeakReference<WorldActivityInterface> worldProvider;
 
     private final int minChunkX, minChunkZ, maxChunkX, maxChunkZ;
+    private final Dimension dimension;
 
 
-    public MarkerAsyncTask(WorldActivityInterface worldProvider, ChunkManager chunkManager, int minChunkX, int minChunkZ, int maxChunkX, int maxChunkZ){
+    public MarkerAsyncTask(WorldActivityInterface worldProvider, int minChunkX, int minChunkZ,
+                           int maxChunkX, int maxChunkZ, Dimension dimension) {
         this.minChunkX = minChunkX;
         this.minChunkZ = minChunkZ;
         this.maxChunkX = maxChunkX;
         this.maxChunkZ = maxChunkZ;
+        this.dimension = dimension;
 
-        this.worldProvider = worldProvider;
-        this.chunkManager = chunkManager;
+        this.worldProvider = new WeakReference<>(worldProvider);
     }
 
     @Override
     protected Void doInBackground(Void... v) {
 
         int cX, cZ;
-        for(cZ = minChunkZ; cZ < maxChunkZ; cZ++){
-            for(cX = minChunkX; cX < maxChunkX; cX++){
+        for (cZ = minChunkZ; cZ < maxChunkZ; cZ++) {
+            for (cX = minChunkX; cX < maxChunkX; cX++) {
                 loadEntityMarkers(cX, cZ);
                 loadTileEntityMarkers(cX, cZ);
                 loadCustomMarkers(cX, cZ);
@@ -52,9 +57,10 @@ public class MarkerAsyncTask extends AsyncTask<Void, AbstractMarker, Void> {
         return null;
     }
 
-    private void loadEntityMarkers(int chunkX, int chunkZ){
+    private void loadEntityMarkers(int chunkX, int chunkZ) {
         try {
-            Chunk chunk = chunkManager.getChunk(chunkX, chunkZ);
+            Chunk chunk = worldProvider.get().getWorld().getWorldData()
+                    .getChunk(chunkX, chunkZ, dimension);
 
             NBTChunkData entityData = chunk.getEntity();
 
@@ -62,36 +68,44 @@ public class MarkerAsyncTask extends AsyncTask<Void, AbstractMarker, Void> {
 
             entityData.load();
 
-            if(entityData.tags == null) return;
+            if (entityData.tags == null) return;
 
             for (Tag tag : entityData.tags) {
-                if (tag instanceof CompoundTag) {
-                    CompoundTag compoundTag = (CompoundTag) tag;
-                    //int id = ((IntTag) compoundTag.getChildTagByKey("id")).getValue();
-                    String tempName = compoundTag.getChildTagByKey("identifier").getValue().toString();
-                    tempName = tempName.replace("minecraft:","");
-                    tempName =  tempName.substring(0, 1).toUpperCase() + tempName.substring(1);
-                    int id = Entity.getEntity(tempName).id;
-                    Entity e = Entity.getEntity(id & 0xff);
-                    if (e != null && e.bitmap != null) {
-                        List<Tag> pos = ((ListTag) compoundTag.getChildTagByKey("Pos")).getValue();
-                        float xf = ((FloatTag) pos.get(0)).getValue();
-                        float yf = ((FloatTag) pos.get(1)).getValue();
-                        float zf = ((FloatTag) pos.get(2)).getValue();
-
-                        this.publishProgress(new AbstractMarker(Math.round(xf), Math.round(yf), Math.round(zf), chunkManager.dimension, e, false));
+                if (!(tag instanceof CompoundTag)) continue;
+                CompoundTag compoundTag = (CompoundTag) tag;
+                Entity e = null;
+                {
+                    Tag idTag = compoundTag.getChildTagByKey("id");
+                    if (idTag instanceof IntTag) {
+                        Integer id = ((IntTag) idTag).getValue();
+                        if (id != null) e = Entity.getEntity(id);
                     }
                 }
+                if (e == null) {
+                    Tag idenTag = compoundTag.getChildTagByKey("identifier");
+                    if (idenTag instanceof StringTag) {
+                        String identifier = ((StringTag) idenTag).getValue();
+                        if (identifier != null) e = Entity.getEntity(identifier);
+                    }
+                }
+                if (e == null) e = Entity.UNKNOWN;
+                List<Tag> pos = ((ListTag) compoundTag.getChildTagByKey("Pos")).getValue();
+                float xf = ((FloatTag) pos.get(0)).getValue();
+                float yf = ((FloatTag) pos.get(1)).getValue();
+                float zf = ((FloatTag) pos.get(2)).getValue();
+
+                this.publishProgress(new AbstractMarker(Math.round(xf), Math.round(yf), Math.round(zf), dimension, e, false));
             }
 
-        } catch (Exception e){
-            Log.w(e.getMessage());
+        } catch (Exception e) {
+            Log.d(this, e);
         }
     }
 
-    private void loadTileEntityMarkers(int chunkX, int chunkZ){
+    private void loadTileEntityMarkers(int chunkX, int chunkZ) {
         try {
-            Chunk chunk = chunkManager.getChunk(chunkX, chunkZ);
+            Chunk chunk = worldProvider.get().getWorld().getWorldData()
+                    .getChunk(chunkX, chunkZ, dimension);
 
             NBTChunkData tileEntityData = chunk.getBlockEntity();
 
@@ -99,7 +113,7 @@ public class MarkerAsyncTask extends AsyncTask<Void, AbstractMarker, Void> {
 
             tileEntityData.load();
 
-            if(tileEntityData.tags == null) return;
+            if (tileEntityData.tags == null) return;
 
             for (Tag tag : tileEntityData.tags) {
                 if (tag instanceof CompoundTag) {
@@ -111,18 +125,19 @@ public class MarkerAsyncTask extends AsyncTask<Void, AbstractMarker, Void> {
                         int eY = ((IntTag) compoundTag.getChildTagByKey("y")).getValue();
                         int eZ = ((IntTag) compoundTag.getChildTagByKey("z")).getValue();
 
-                        this.publishProgress(new AbstractMarker(Math.round(eX), Math.round(eY), Math.round(eZ), chunkManager.dimension, te, false));
+                        this.publishProgress(new AbstractMarker(Math.round(eX), Math.round(eY), Math.round(eZ), dimension, te, false));
                     }
                 }
             }
 
-        } catch (Exception e){
-            Log.w(e.getMessage());
+        } catch (Exception e) {
+            Log.d(this, e);
         }
     }
 
-    private void loadCustomMarkers(int chunkX, int chunkZ){
-        Collection<AbstractMarker> chunk = worldProvider.getWorld().getMarkerManager()
+    private void loadCustomMarkers(int chunkX, int chunkZ) {
+        WorldActivityInterface wai = worldProvider.get();
+        Collection<AbstractMarker> chunk = wai.getWorld().getMarkerManager()
                 .getMarkersOfChunk(chunkX, chunkZ);
         AbstractMarker[] markers = new AbstractMarker[chunk.size()];
         this.publishProgress(chunk.toArray(markers));
@@ -130,8 +145,27 @@ public class MarkerAsyncTask extends AsyncTask<Void, AbstractMarker, Void> {
 
     @Override
     protected void onProgressUpdate(AbstractMarker... values) {
-        for(AbstractMarker marker : values){
-            worldProvider.addMarker(marker);
+        WorldActivityInterface wai = worldProvider.get();
+
+        // Some of the marks may have been added to screen already, remove first.
+        // TODO: Why not just skipping them?
+        for (AbstractMarker marker : values) {
+            // 2019/2/27 fixing crash here.
+            // Fatal Exception: java.lang.IllegalStateException
+            // The specified child already has a parent.
+            // You must call removeView() on the child's parent first.
+            // com.qozix.tileview.markers.MarkerLayout.addMarker
+            // We found it caused by custom markers reusing issue.
+            // Entity and TileEntity marks are all newly created.
+            // So we're removing custom marks from parent if present.
+
+            if (marker.view != null) {
+                ViewParent par = marker.view.getParent();
+                if (par instanceof ViewGroup)
+                    ((ViewGroup) par).removeView(marker.view);
+            }
+
+            wai.addMarker(marker);
         }
     }
 
